@@ -1,7 +1,4 @@
 """
-Script principal do Dia 1: dado o nome de uma startup, busca URLs
-candidatas, coleta o conteúdo de cada uma e salva tudo em disco com
-metadados de rastreabilidade (fonte, data de coleta, método).
 
 Uso:
     python -m src.scraping.search_and_fetch "nome da startup"
@@ -10,15 +7,13 @@ Saída:
     data/raw/<nome_startup_slug>/<timestamp>.json
     Um arquivo JSON por URL coletada, dentro de uma pasta por startup.
 
-Este é o ponto de entrada do Entregável 1 (Pipeline de scraping) em
-sua versão mínima. Nos próximos dias isso se torna o "Scraper Agent"
-dentro do grafo LangGraph.
 """
 import json
 import logging
 import sys
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlparse
 
 from src.scraping.search import buscar_urls_candidatas
 from src.scraping.fetcher import fetch_page
@@ -30,6 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 DATA_RAW_DIR = Path("data/raw")
+CUBO_RAW_DIR = Path("data/raw/_cubo")
 
 
 def _slug(texto: str) -> str:
@@ -39,6 +35,51 @@ def _slug(texto: str) -> str:
         .replace(" ", "_")
         .replace("/", "-")
     )
+
+
+def _deduplicar_urls(urls: list[str]) -> list[str]:
+    vistas: set[str] = set()
+    ordenadas: list[str] = []
+    for url in urls:
+        normalizada = url.strip()
+        if not normalizada or normalizada in vistas:
+            continue
+        vistas.add(normalizada)
+        ordenadas.append(normalizada)
+    return ordenadas
+
+
+def _classificar_fonte_url(url: str) -> str:
+    dominio = urlparse(url).netloc.lower()
+
+    if "cubo.itau" in dominio:
+        return "diretorio_cubo"
+    if "linkedin.com" in dominio:
+        return "linkedin"
+    if "braziljournal.com" in dominio:
+        return "noticia_brazil_journal"
+    if "neofeed.com.br" in dominio:
+        return "noticia_neofeed"
+    if "distrito.me" in dominio:
+        return "diretorio_distrito"
+
+    return "busca_geral"
+
+
+def _montar_urls_priorizadas(
+    nome_startup: str,
+    max_urls: int,
+    urls_diretas: list[str] | None = None,
+) -> list[str]:
+    urls_base = _deduplicar_urls(urls_diretas or [])
+
+    if len(urls_base) >= max_urls:
+        return urls_base[:max_urls]
+
+    logger.info("Complementando com busca aberta para: %s", nome_startup)
+    urls_busca = buscar_urls_candidatas(nome_startup, max_resultados=max_urls)
+
+    return _deduplicar_urls(urls_base + urls_busca)[:max_urls]
 
 
 def coletar_startup(
@@ -62,10 +103,17 @@ def coletar_startup(
     """
     if urls_diretas:
         logger.info("Usando %d URLs diretas fornecidas manualmente.", len(urls_diretas))
-        urls = urls_diretas
+        urls = _montar_urls_priorizadas(
+            nome_startup=nome_startup,
+            max_urls=max_urls,
+            urls_diretas=urls_diretas,
+        )
     else:
         logger.info("Buscando URLs candidatas para: %s", nome_startup)
-        urls = buscar_urls_candidatas(nome_startup, max_resultados=max_urls)
+        urls = _montar_urls_priorizadas(
+            nome_startup=nome_startup,
+            max_urls=max_urls,
+        )
 
     if not urls:
         logger.warning(
@@ -81,8 +129,9 @@ def coletar_startup(
     documentos_coletados = []
 
     for i, url in enumerate(urls, start=1):
-        logger.info("[%d/%d] Coletando: %s", i, len(urls), url)
-        documento = fetch_page(url, fonte_tipo="busca_geral")
+        fonte_tipo = _classificar_fonte_url(url)
+        logger.info("[%d/%d] Coletando (%s): %s", i, len(urls), fonte_tipo, url)
+        documento = fetch_page(url, fonte_tipo=fonte_tipo)
 
         if documento.erro:
             logger.warning("  -> Falhou: %s", documento.erro)
@@ -111,6 +160,73 @@ def coletar_startup(
     return documentos_coletados
 
 
+def _carregar_json_cubo(caminho_json: str | None = None) -> list[dict]:
+    if caminho_json:
+        caminho = Path(caminho_json)
+    else:
+        arquivos = sorted(CUBO_RAW_DIR.glob("vitrine_cubo_*.json"))
+        if not arquivos:
+            raise FileNotFoundError(
+                "Nenhum JSON do Cubo encontrado em data/raw/_cubo/."
+            )
+        caminho = arquivos[-1]
+
+    return json.loads(caminho.read_text(encoding="utf-8"))
+
+
+def coletar_startups_do_cubo(
+    caminho_json: str | None = None,
+    somente_ia: bool = False,
+    limite_startups: int | None = None,
+    max_urls_por_startup: int = 5,
+) -> dict:
+    """
+    Usa a base do Cubo como população de startups e coleta evidências
+    por startup. Prioriza a url_perfil do Cubo como primeira fonte e
+    complementa com busca aberta quando necessário.
+    """
+    startups = _carregar_json_cubo(caminho_json)
+
+    if somente_ia:
+        startups = [
+            s for s in startups
+            if (s.get("relevancia_ia") or {}).get("vale_aprofundar")
+        ]
+
+    if limite_startups is not None:
+        startups = startups[:limite_startups]
+
+    resumo = {
+        "total_startups_processadas": len(startups),
+        "startups_com_documentos": 0,
+        "documentos_total": 0,
+    }
+
+    for startup in startups:
+        nome = startup["nome"]
+        urls_diretas = []
+        if startup.get("url_perfil"):
+            urls_diretas.append(startup["url_perfil"])
+
+        urls = _montar_urls_priorizadas(
+            nome_startup=nome,
+            max_urls=max_urls_por_startup,
+            urls_diretas=urls_diretas,
+        )
+
+        documentos = coletar_startup(
+            nome,
+            max_urls=max_urls_por_startup,
+            urls_diretas=urls,
+        )
+
+        if documentos:
+            resumo["startups_com_documentos"] += 1
+            resumo["documentos_total"] += len(documentos)
+
+    return resumo
+
+
 def main():
     if len(sys.argv) < 2:
         print('Uso: python -m src.scraping.search_and_fetch "nome da startup"')
@@ -119,9 +235,37 @@ def main():
             '  python -m src.scraping.search_and_fetch "nome da startup" '
             '--urls https://site1.com,https://site2.com'
         )
+        print(
+            'Ou, para coletar em lote a partir do Cubo:\n'
+            '  python -m src.scraping.search_and_fetch --from-cubo --only-ia --limit-startups 10'
+        )
         sys.exit(1)
 
-    if "--urls" in sys.argv:
+    if "--from-cubo" in sys.argv:
+        caminho_json = None
+        limite_startups = None
+        max_urls_por_startup = 5
+
+        if "--cubo-json" in sys.argv:
+            idx = sys.argv.index("--cubo-json")
+            caminho_json = sys.argv[idx + 1]
+
+        if "--limit-startups" in sys.argv:
+            idx = sys.argv.index("--limit-startups")
+            limite_startups = int(sys.argv[idx + 1])
+
+        if "--max-urls" in sys.argv:
+            idx = sys.argv.index("--max-urls")
+            max_urls_por_startup = int(sys.argv[idx + 1])
+
+        resumo = coletar_startups_do_cubo(
+            caminho_json=caminho_json,
+            somente_ia="--only-ia" in sys.argv,
+            limite_startups=limite_startups,
+            max_urls_por_startup=max_urls_por_startup,
+        )
+        print(json.dumps(resumo, ensure_ascii=False, indent=2))
+    elif "--urls" in sys.argv:
         idx = sys.argv.index("--urls")
         nome_startup = " ".join(sys.argv[1:idx])
         urls_diretas = sys.argv[idx + 1].split(",")

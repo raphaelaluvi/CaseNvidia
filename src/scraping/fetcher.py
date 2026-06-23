@@ -1,10 +1,3 @@
-"""
-Fetcher simples: dado uma URL, baixa o HTML e extrai o texto principal.
-
-Dia 1 = versão simples com requests + BeautifulSoup.
-Evolução planejada (Dia 2+): trafilatura para extração de texto principal
-mais robusta, e Playwright para sites que dependem de JavaScript.
-"""
 import logging
 
 import requests
