@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: radar_qdrant
+    ports:
+      - "6333:6333"   # API HTTP/gRPC
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: radar_postgres
+    environment:
+      POSTGRES_DB: startup_radar
+      POSTGRES_USER: radar_user
+      POSTGRES_PASSWORD: radar_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+  postgres_data:
