@@ -4,9 +4,12 @@ import os # funcoes
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA_PROCESSED = ROOT / "data" / "processed"
+DATA_RAW = ROOT / "data" / "raw"
+NVIDIA_KB_RAW_DIR = DATA_RAW / "nvidia_kb"
+NVIDIA_KB_PROCESSED_DIR = DATA_PROCESSED / "nvidia_kb"
 
 # Modelo de embeddings (HuggingFace / sentence-transformers)
-EMBEDDING_MODEL = os.environ.get("RAG_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+EMBEDDING_MODEL = os.environ.get("RAG_EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5")
 CHROMA_PERSIST_DIR = os.environ.get("CHROMA_PERSIST_DIR", str(ROOT / "data" / "chroma_db"))
 
 # OpenRouter / LLM

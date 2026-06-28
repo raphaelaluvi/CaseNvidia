@@ -1,0 +1,21 @@
+{
+  "id": "triton_inference_server",
+  "titulo": "Dynamo-Triton Open-Source Software | NVIDIA Developer",
+  "nome_produto": "Triton Inference Server",
+  "categoria": "inference_infrastructure",
+  "conteudo": "NVIDIA Dynamo-Triton, formerly NVIDIA Triton Inference Server, enables deployment of AI models across major frameworks, including TensorRT, PyTorch, ONNX, OpenVINO, Python, and RAPIDS FIL.\nIt delivers high performance with dynamic batching, concurrent execution, and optimized configurations. Dynamo-Triton supports real-time, batched, ensemble, and audio/video streaming workloads and runs on NVIDIA GPUs, non-NVIDIA accelerators, x86, and ARM CPUs.\nOpen source and compatible with DevOps and MLOps workflows, Dynamo-Triton integrates with Kubernetes for scaling and Prometheus for monitoring. It works across cloud and on-premises AI platforms and, as part of NVIDIA AI Enterprise, provides a secure, production-ready environment with stable APIs and support for AI deployment.\nFor large language model (LLM) use cases, NVIDIA also offers NVIDIA Dynamo, designed for LLM inference and multi-mode deployment. It complements Dynamo-Triton with LLM-specific optimizations such as disaggregated serving, prefix caching, and key-value caching to storage.\nIntroductory Resources - Self-Paced Training\nLearn anytime, anywhere, with just a computer and an internet connection through our Deploying a Model for Inference at Production Scale self-paced course.\nFind the right license to deploy, run, and scale AI inference for any application on any platform.\nTriton Inference Server is available as open-source software on GitHub with end-to-end examples.\nAccess Triton Inference Server’s Repository\nLinux-based Triton Inference Server containers for x86 and Arm® are available on NVIDIA NGC™ client libraries as well as binary releases of Triton Inference Server for Windows and NVIDIA Jetson JetPack™ are available on GitHub.\nPull Triton Inference Server From NGC\nDownload for Windows or Jetson\nPurchase NVIDIA AI Enterprise, which includes Triton Inference Server for production inference.\nApply Now for a 90-Day NVIDIA AI Enterprise Evaluation License\nApply to Try Triton Inference Server on NVIDIA LaunchPad\nContact Us to Learn More About Purchasing Triton\nAccess technical content on inference topics such as large language models, cloud deployments, and model ensembles.\nLarge language models (LLMs) are an increasingly important class of deep learning models, and they require unique features to maximize their acceleration. This kit will take you through features of Triton Inference Server built around LLMs and how to utilize them.\nGet Started\nTriton Inference Server includes many features and tools to help deploy deep learning at scale and in the cloud. With this kit, you can explore how to deploy Triton inference Server in different cloud and orchestration environments.\nModern deep learning systems often require the use of multiple models in a pipeline and the use of accelerated pre- and post processing steps. Learn how to implement these efficiently in Triton Inference Server with model ensembles and business logic scripting.\nNVIDIA believes Trustworthy AI is a shared responsibility and we have established policies and practices to enable development for a wide array of AI applications. When downloaded or used in accordance with our terms of service, developers should work with their supporting model team to ensure this model meets requirements for the relevant industry and use case and addresses unforeseen product misuse. Please report security vulnerabilities or NVIDIA AI Concerns here.",
+  "url_pesquisa": "https://developer.nvidia.com/triton-inference-server",
+  "tags": [
+    "inference",
+    "latency",
+    "throughput",
+    "serving"
+  ],
+  "caso_uso": [
+    "serving em producao",
+    "otimizacao de inferencia",
+    "batching"
+  ],
+  "fonte_tipo": "official_doc",
+  "coletado_em": "2026-06-28T17:10:21.478800+00:00"
+}
