@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import re
+from typing import Any
+from urllib.parse import urlparse
 
 from src.extraction import extract_startup_profile, save_extraction_result
 from src.models import Recommendation, ScrapeRun, StartupClassification
@@ -21,6 +24,227 @@ def _error(state: PipelineState, message: str) -> dict:
     return {
         "errors": [*(state.get("errors") or []), message],
         "logs": _log(state, f"erro: {message}"),
+    }
+
+
+def _stage_quality(
+    state: PipelineState,
+    stage: str,
+    status: str,
+    **details: Any,
+) -> dict[str, Any]:
+    quality_flags = dict(state.get("quality_flags") or {})
+    quality_flags[stage] = {"status": status, **details}
+    return quality_flags
+
+
+def _increment_retry(state: PipelineState, stage: str) -> dict[str, int]:
+    retry_counts = dict(state.get("retry_counts") or {})
+    retry_counts[stage] = retry_counts.get(stage, 0) + 1
+    return retry_counts
+
+
+def _normalize_text(value: str | None) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip().lower())
+
+
+def _tokenize(value: str | None) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]{3,}", _normalize_text(value))
+        if token not in {"startup", "platform", "plataforma", "company", "empresa"}
+    }
+
+
+def _normalize_url(value: str | None) -> str:
+    if not value:
+        return ""
+    parsed = urlparse(value.strip().lower())
+    netloc = parsed.netloc.replace("www.", "")
+    path = parsed.path.rstrip("/")
+    return f"{netloc}{path}"
+
+
+def _semantic_variants(value: str | None) -> set[str]:
+    normalized = _normalize_text(value)
+    if not normalized:
+        return set()
+    variants = {normalized}
+    alias_groups = (
+        {"saude", "saúde", "health", "healthcare", "health tech", "healthtech"},
+        {"financas", "finanças", "finance", "financial", "fintech"},
+        {"varejo", "retail", "commerce", "ecommerce"},
+        {"juridico", "jurídico", "legal", "legaltech"},
+    )
+    tokens = set(re.findall(r"[a-z0-9]+", normalized))
+    for group in alias_groups:
+        if tokens.intersection(set(" ".join(group).split())) or normalized in group:
+            variants.update(group)
+    return {_normalize_text(item) for item in variants}
+
+
+def _has_semantic_support(value: str | None, candidate_texts: list[str | None]) -> bool:
+    source_tokens = _tokenize(value)
+    if not source_tokens:
+        return False
+    for candidate in candidate_texts:
+        candidate_tokens = _tokenize(candidate)
+        if not candidate_tokens:
+            continue
+        overlap = source_tokens.intersection(candidate_tokens)
+        threshold = max(2, min(3, len(source_tokens) // 3 or 1))
+        if len(overlap) >= threshold:
+            return True
+    return False
+
+
+def _extract_llm_field_coverage(startup) -> dict[str, Any]:
+    extraction = (startup.metadata or {}).get("llm_extraction") or {}
+    field_names = (
+        "name",
+        "short_description",
+        "segment",
+        "ai_native_signals",
+        "business_model",
+        "official_website",
+        "target_market",
+        "evidence_summary",
+    )
+    covered = 0
+    weak_fields: list[str] = []
+    for field_name in field_names:
+        field_payload = extraction.get(field_name) or {}
+        evidence_ids = field_payload.get("evidence_ids") or []
+        source_urls = field_payload.get("source_urls") or []
+        confidence = field_payload.get("confidence")
+        has_support = bool(evidence_ids or source_urls)
+        if has_support:
+            covered += 1
+        if confidence is not None and confidence < 0.55:
+            weak_fields.append(field_name)
+        elif not has_support and field_payload.get("value"):
+            weak_fields.append(field_name)
+    return {
+        "field_count": len(field_names),
+        "covered_fields": covered,
+        "weak_fields": weak_fields,
+        "extraction": extraction,
+    }
+
+
+def _validate_startup_against_evidences(startup, evidences) -> dict[str, Any]:
+    evidence_by_id = {item.id: item for item in evidences if item.id}
+    trusted_evidences = [item for item in evidences if item.is_validated and not item.error]
+    all_text = "\n".join(filter(None, [item.content or item.excerpt for item in evidences]))
+    trusted_text = "\n".join(filter(None, [item.content or item.excerpt for item in trusted_evidences]))
+    weak_evidence_ids: list[str] = []
+    contradictions: list[str] = []
+    unsupported_fields: list[str] = []
+    extraction_coverage = _extract_llm_field_coverage(startup)
+    llm_extraction = extraction_coverage["extraction"]
+    trusted_urls = {_normalize_url(item.url) for item in trusted_evidences if item.url}
+    startup_source_urls = {_normalize_url(item) for item in startup.source_urls if item}
+    llm_source_urls = {
+        _normalize_url(item)
+        for field_payload in llm_extraction.values()
+        if isinstance(field_payload, dict)
+        for item in (field_payload.get("source_urls") or [])
+        if item
+    }
+    trusted_excerpts = [
+        item.excerpt or item.content
+        for item in trusted_evidences
+        if item.excerpt or item.content
+    ]
+    llm_excerpts = [
+        excerpt
+        for field_payload in llm_extraction.values()
+        if isinstance(field_payload, dict)
+        for excerpt in (field_payload.get("source_excerpts") or [])
+        if excerpt
+    ]
+
+    for evidence in evidences:
+        notes = list(evidence.metadata.get("validation_notes") or [])
+        if evidence.error:
+            notes.append("evidence_error")
+        if not evidence.is_validated:
+            notes.append("untrusted_source")
+        if evidence.relevance_score is not None and evidence.relevance_score < 0.2:
+            notes.append("low_relevance_score")
+        if (evidence.metadata.get("source_priority") or "") in {"secondary_social", "general_web"}:
+            notes.append("low_source_priority")
+        if notes:
+            evidence.metadata["validation_notes"] = sorted(set(notes))
+            weak_evidence_ids.append(evidence.id or evidence.url)
+
+    startup_name_tokens = _tokenize(startup.name)
+    if startup_name_tokens and not startup_name_tokens.intersection(_tokenize(trusted_text)):
+        contradictions.append("Nome estruturado nao aparece nas evidencias confiaveis.")
+
+    website = _normalize_url(startup.canonical_url)
+    if website and website not in trusted_urls and website not in startup_source_urls and website not in llm_source_urls:
+        unsupported_fields.append("canonical_url")
+
+    segment_variants = _semantic_variants(startup.segment)
+    trusted_text_normalized = _normalize_text(trusted_text)
+    if segment_variants and not any(variant in trusted_text_normalized for variant in segment_variants):
+        unsupported_fields.append("segment")
+
+    short_description_payload = llm_extraction.get("short_description") or {}
+    short_description_has_llm_support = bool(
+        (short_description_payload.get("evidence_ids") or [])
+        or (short_description_payload.get("source_urls") or [])
+        or (short_description_payload.get("source_excerpts") or [])
+    )
+    if (
+        startup.short_description
+        and not short_description_has_llm_support
+        and not _has_semantic_support(
+            startup.short_description,
+            [*trusted_excerpts, *llm_excerpts, trusted_text],
+        )
+    ):
+        unsupported_fields.append("short_description")
+
+    for field_name in ("name", "short_description", "segment", "official_website", "target_market", "business_model"):
+        field_payload = llm_extraction.get(field_name) or {}
+        value = field_payload.get("value")
+        if not value:
+            continue
+        field_evidence_ids = field_payload.get("evidence_ids") or []
+        missing_ids = [item_id for item_id in field_evidence_ids if item_id not in evidence_by_id]
+        if missing_ids:
+            contradictions.append(
+                f"Campo {field_name} cita evidencias inexistentes: {', '.join(missing_ids)}."
+            )
+        if not field_evidence_ids and not (field_payload.get("source_urls") or []):
+            unsupported_fields.append(field_name)
+
+    contradictions.extend(llm_extraction.get("contradictions") or [])
+    contradictions = sorted(dict.fromkeys(contradictions))
+    unsupported_fields = sorted(dict.fromkeys(unsupported_fields))
+    weak_evidence_ids = sorted(dict.fromkeys(weak_evidence_ids))
+
+    quality_status = "ok"
+    if contradictions or len(trusted_evidences) == 0:
+        quality_status = "needs_review"
+    elif unsupported_fields or weak_evidence_ids or extraction_coverage["weak_fields"]:
+        quality_status = "warning"
+
+    return {
+        "status": quality_status,
+        "trusted_evidence_count": len(trusted_evidences),
+        "total_evidence_count": len(evidences),
+        "weak_evidence_ids": weak_evidence_ids,
+        "unsupported_fields": unsupported_fields,
+        "contradictions": contradictions,
+        "llm_weak_fields": extraction_coverage["weak_fields"],
+        "coverage_ratio": (
+            extraction_coverage["covered_fields"] / extraction_coverage["field_count"]
+            if extraction_coverage["field_count"]
+            else 0.0
+        ),
     }
 
 
@@ -108,6 +332,15 @@ def extractor_node(state: PipelineState) -> dict:
     return {
         "structured_startup": startup,
         "validated_evidences": evidences,
+        "retry_requested_by": None,
+        "quality_flags": _stage_quality(
+            state,
+            "extractor",
+            "ok" if evidences else "warning",
+            source_count=len(documents),
+            evidence_count=len(evidences),
+            extraction_status=startup.metadata.get("extraction_status"),
+        ),
         "logs": _log(
             state,
             f"extractor estruturou startup e {len(evidences)} evidencias em {paths['startup_path']}",
@@ -143,8 +376,66 @@ def classifier_node(state: PipelineState) -> dict:
         "structured_startup": startup,
         "initial_classification": classification,
         "validated_evidences": evidences,
+        "quality_flags": _stage_quality(
+            state,
+            "classifier",
+            "ok" if classification.score is not None and classification.score >= 0.35 else "warning",
+            label=classification.label,
+            score=classification.score,
+            method=classification.method,
+        ),
         "logs": _log(state, f"classifier marcou startup como {classification.label}"),
     }
+
+
+def validator_node(state: PipelineState) -> dict:
+    startup = state.get("structured_startup")
+    evidences = state.get("validated_evidences") or []
+    if startup is None:
+        return _error(state, "Validator sem startup estruturada.")
+
+    report = _validate_startup_against_evidences(startup, evidences)
+    startup.metadata["validation_report"] = report
+    startup.metadata["validation_status"] = report["status"]
+    startup.metadata["validation_checked_at"] = datetime.now(timezone.utc).isoformat()
+    startup.metadata["weak_evidence_ids"] = report["weak_evidence_ids"]
+    startup.metadata["unsupported_fields"] = report["unsupported_fields"]
+    startup.metadata["contradictions"] = report["contradictions"]
+
+    retry_counts = dict(state.get("retry_counts") or {})
+    retry_requested_by = None
+    if report["status"] == "needs_review" and retry_counts.get("extractor", 0) < 1:
+        retry_counts = _increment_retry(state, "extractor")
+        retry_requested_by = "validator"
+
+    return {
+        "structured_startup": startup,
+        "validated_evidences": evidences,
+        "validation_report": report,
+        "retry_counts": retry_counts,
+        "retry_requested_by": retry_requested_by,
+        "quality_flags": _stage_quality(
+            state,
+            "validator",
+            report["status"],
+            contradictions=len(report["contradictions"]),
+            weak_evidences=len(report["weak_evidence_ids"]),
+            unsupported_fields=report["unsupported_fields"],
+            coverage_ratio=report["coverage_ratio"],
+        ),
+        "logs": _log(
+            state,
+            "validator verificou consistencia entre startup estruturada e evidencias"
+            + (" e solicitou retry heuristico do extractor" if retry_requested_by else ""),
+        ),
+    }
+
+
+def route_after_validator(state: PipelineState) -> str:
+    report = state.get("validation_report") or {}
+    if state.get("retry_requested_by") == "validator" and report.get("status") == "needs_review":
+        return "extractor"
+    return "rag"
 
 
 def rag_node(state: PipelineState) -> dict:
@@ -164,6 +455,12 @@ def rag_node(state: PipelineState) -> dict:
         logs = _log(state, f"rag fallback acionado: {exc}")
     return {
         "rag_context": rag_context,
+        "quality_flags": _stage_quality(
+            state,
+            "rag",
+            "ok" if "indisponivel" not in rag_context.lower() else "warning",
+            used_fallback="indisponivel" in rag_context.lower(),
+        ),
         "logs": logs,
     }
 
@@ -209,6 +506,12 @@ def recommendation_node(
 
     return {
         "recommendations": [recommendation],
+        "quality_flags": _stage_quality(
+            state,
+            "recommendation",
+            "ok",
+            recommendation_count=1,
+        ),
         "logs": _log(state, "recommendation gerou recomendacao inicial e persistiu camada estruturada"),
     }
 
@@ -227,9 +530,15 @@ def briefing_node(state: PipelineState) -> dict:
         f"Startup analisada: {startup.name}\n"
         f"Classificacao inicial: {classification.label if classification else 'unknown'}\n"
         f"Evidencias validadas: {sum(1 for item in evidences if item.is_validated)}/{len(evidences)}\n"
+        f"Status de validacao: {(state.get('validation_report') or {}).get('status', 'unknown')}\n"
         f"Resumo: {recommendation_summary}"
     )
     return {
         "final_briefing": briefing,
+        "quality_flags": _stage_quality(
+            state,
+            "briefing",
+            "ok",
+        ),
         "logs": _log(state, "briefing consolidou saida final do fluxo"),
     }

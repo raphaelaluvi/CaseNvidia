@@ -14,6 +14,10 @@ class PipelineState(TypedDict, total=False):
     structured_startup: Startup | None
     initial_classification: StartupClassification | None
     validated_evidences: list[Evidence]
+    validation_report: dict[str, Any]
+    quality_flags: dict[str, Any]
+    retry_counts: dict[str, int]
+    retry_requested_by: str | None
     scrape_run: ScrapeRun | None
     rag_context: str
     recommendations: list[Recommendation]
