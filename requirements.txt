@@ -1,5 +1,6 @@
 # --- LLM e agentes ---
 groq==0.11.0
+httpx<0.28
 langgraph==0.2.39
 langchain==0.3.7
 langchain-groq==0.2.1
@@ -13,7 +14,7 @@ trafilatura==1.12.2
 
 # --- RAG / embeddings (a partir do Dia 4, mas instalado desde já) ---
 sentence-transformers==3.2.1
-qdrant-client==1.12.1
+chromadb==0.5.23
 cohere==5.11.4
 
 # --- Banco estruturado ---

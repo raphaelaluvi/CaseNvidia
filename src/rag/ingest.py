@@ -42,7 +42,44 @@ NOISE_PATTERNS = [
     r"^Alternatively, you can .+watch this video on YouTube.+$",
     r"^Consent for Optional Cookies$",
     r"^Copyright .+ NVIDIA Corporation$",
+    r"^Section$",
+    r"^First Name$",
+    r"^Last Name$",
+    r"^Business Email Address$",
+    r"^Organization / University Name$",
+    r"^Preferred Language$",
+    r"^State/Province$",
+    r"^Location$",
+    r"^Industry$",
+    r"^Job Title$",
 ]
+
+DROP_SELECTORS = (
+    "script",
+    "style",
+    "noscript",
+    "form",
+    "footer",
+    "nav",
+    "header",
+    "iframe",
+    "input",
+    "select",
+    "option",
+    "button",
+    "label",
+    "#country-selector-modal",
+    "#globalFooter",
+    "#main-header",
+    ".global-footer",
+    ".page-footer",
+    ".footer-container",
+    ".navigation",
+    ".subscribe-form",
+    ".form-wrapper",
+    ".modal",
+    ".popup",
+)
 
 HEADERS = {
     "User-Agent": (
@@ -57,6 +94,16 @@ DEFAULT_NVIDIA_URLS = [
     "https://www.nvidia.com/en-us/ai-data-science/products/nim-microservices/",
     "https://www.nvidia.com/en-us/ai-data-science/products/nemo/",
     "https://developer.nvidia.com/triton-inference-server",
+    "https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/",
+    "https://rapids.ai/",
+    "https://docs.rapids.ai/api/cudf/stable/",
+    "https://docs.rapids.ai/api/cuml/stable/",
+    "https://developer.nvidia.com/cuda-toolkit",
+    "https://www.nvidia.com/en-us/omniverse/",
+    "https://developer.nvidia.com/isaac",
+    "https://www.nvidia.com/en-us/clara/",
+    "https://developer.nvidia.com/morpheus-cybersecurity",
+    "https://www.nvidia.com/en-us/data-center/products/ai-enterprise/",
 ]
 
 
@@ -101,6 +148,86 @@ SOURCE_SPECS: List[SourceSpec] = [
         categoria="inference_infrastructure",
         tags=["inference", "latency", "throughput", "serving"],
         caso_uso=["serving em producao", "otimizacao de inferencia", "batching"],
+        fonte_tipo="official_doc",
+    ),
+    SourceSpec(
+        url="https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/",
+        nome_produto="Triton Documentation",
+        categoria="inference_infrastructure",
+        tags=["triton", "documentation", "deployment", "serving"],
+        caso_uso=["configuracao de serving", "operacao em producao", "otimizacao de inferencia"],
+        fonte_tipo="official_doc",
+    ),
+    SourceSpec(
+        url="https://rapids.ai/",
+        nome_produto="NVIDIA RAPIDS",
+        categoria="data_acceleration",
+        tags=["data", "gpu", "analytics", "etl"],
+        caso_uso=["aceleracao de pipelines de dados", "analytics em gpu", "preparacao de dados"],
+        fonte_tipo="official_doc",
+    ),
+    SourceSpec(
+        url="https://docs.rapids.ai/api/cudf/stable/",
+        nome_produto="cuDF",
+        categoria="gpu_dataframe",
+        tags=["dataframe", "gpu", "pandas", "etl"],
+        caso_uso=["processamento de dataframes em gpu", "etl acelerado", "substituicao de pandas"],
+        fonte_tipo="official_doc",
+    ),
+    SourceSpec(
+        url="https://docs.rapids.ai/api/cuml/stable/",
+        nome_produto="cuML",
+        categoria="gpu_machine_learning",
+        tags=["machine_learning", "gpu", "training", "sklearn"],
+        caso_uso=["machine learning acelerado em gpu", "treinamento de modelos", "pipelines scikit-learn-like"],
+        fonte_tipo="official_doc",
+    ),
+    SourceSpec(
+        url="https://developer.nvidia.com/cuda-toolkit",
+        nome_produto="CUDA Toolkit",
+        categoria="gpu_programming",
+        tags=["cuda", "gpu", "parallel_programming", "acceleration"],
+        caso_uso=["programacao paralela em gpu", "aceleracao de workloads", "base para software acelerado"],
+        fonte_tipo="official_doc",
+    ),
+    SourceSpec(
+        url="https://www.nvidia.com/en-us/omniverse/",
+        nome_produto="NVIDIA Omniverse",
+        categoria="simulation_3d",
+        tags=["3d", "simulation", "digital_twin", "openusd"],
+        caso_uso=["simulacao", "digital twins", "workflows 3d"],
+        fonte_tipo="official_doc",
+    ),
+    SourceSpec(
+        url="https://developer.nvidia.com/isaac",
+        nome_produto="NVIDIA Isaac",
+        categoria="robotics",
+        tags=["robotics", "simulation", "autonomy", "perception"],
+        caso_uso=["robotica", "simulacao para autonomia", "sistemas autonomos"],
+        fonte_tipo="official_doc",
+    ),
+    SourceSpec(
+        url="https://www.nvidia.com/en-us/clara/",
+        nome_produto="NVIDIA Clara",
+        categoria="healthcare_ai",
+        tags=["healthcare", "medical_imaging", "life_sciences", "ai"],
+        caso_uso=["healthcare", "life sciences", "ia para saude"],
+        fonte_tipo="official_doc",
+    ),
+    SourceSpec(
+        url="https://developer.nvidia.com/morpheus-cybersecurity",
+        nome_produto="NVIDIA Morpheus",
+        categoria="cybersecurity_ai",
+        tags=["cybersecurity", "threat_detection", "streaming", "ai"],
+        caso_uso=["cybersecurity com ia", "deteccao de ameacas", "analise em tempo real"],
+        fonte_tipo="official_doc",
+    ),
+    SourceSpec(
+        url="https://www.nvidia.com/en-us/data-center/products/ai-enterprise/",
+        nome_produto="NVIDIA AI Enterprise",
+        categoria="enterprise_ai_platform",
+        tags=["enterprise", "production", "platform", "support"],
+        caso_uso=["ia em producao", "plataforma empresarial", "suporte enterprise"],
         fonte_tipo="official_doc",
     ),
 ]
@@ -170,6 +297,14 @@ def _extract_title(html: str, fallback: str) -> str:
     return fallback
 
 
+def _extract_markdown_alternate_url(html: str) -> str | None:
+    soup = BeautifulSoup(html, "lxml")
+    tag = soup.find("link", attrs={"rel": "alternate", "type": "text/markdown"})
+    if tag and tag.get("href"):
+        return str(tag["href"]).strip()
+    return None
+
+
 def _extract_main_html(html: str) -> str:
     soup = BeautifulSoup(html, "lxml")
 
@@ -193,6 +328,30 @@ def _extract_main_html(html: str) -> str:
     return html
 
 
+def _prune_html(html: str) -> str:
+    soup = BeautifulSoup(html, "lxml")
+
+    for selector in DROP_SELECTORS:
+        for node in soup.select(selector):
+            node.decompose()
+
+    for node in list(soup.find_all(attrs={"class": True})):
+        if not getattr(node, "attrs", None):
+            continue
+        classes = " ".join(node.get("class", [])).lower()
+        if any(keyword in classes for keyword in ("footer", "form", "modal", "popup", "cookie")):
+            node.decompose()
+
+    for node in list(soup.find_all(attrs={"id": True})):
+        if not getattr(node, "attrs", None):
+            continue
+        node_id = str(node.get("id", "")).lower()
+        if any(keyword in node_id for keyword in ("footer", "form", "modal", "popup", "cookie")):
+            node.decompose()
+
+    return str(soup)
+
+
 def _normalize_lines(text: str) -> str:
     cleaned_lines: List[str] = []
     seen_recent: set[str] = set()
@@ -208,6 +367,15 @@ def _normalize_lines(text: str) -> str:
             continue
         if len(line) <= 2:
             continue
+        # Descarta feeds/tabelas serializadas e blobs com entidades HTML.
+        if line.count("|") >= 4:
+            continue
+        if line.count("&quot;") >= 2:
+            continue
+        if "=&gt;" in line or "googleCookiePolicyLink" in line:
+            continue
+        if line.startswith("link [20"):
+            continue
         if line in seen_recent:
             continue
 
@@ -219,6 +387,8 @@ def _normalize_lines(text: str) -> str:
     text = "\n".join(cleaned_lines)
 
     start_markers = [
+        "NVIDIA Inception is a free program",
+        "Join NVIDIA Inception",
         "What Is NVIDIA",
         "What is NVIDIA",
         "Overview",
@@ -229,6 +399,7 @@ def _normalize_lines(text: str) -> str:
         "Dynamo-Triton",
     ]
     end_markers = [
+        "Inception Program FAQ",
         "Consent for Optional Cookies",
         "Privacy Policy",
         "Copyright",
@@ -246,8 +417,27 @@ def _normalize_lines(text: str) -> str:
     return text.strip()
 
 
-def _extract_text(html: str) -> str:
-    main_html = _extract_main_html(html)
+def _extract_text_from_markdown(markdown: str) -> str:
+    text = markdown.replace("\r\n", "\n")
+    text = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1", text)
+    text = re.sub(r"^[#>\-\*\|` ]+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return _normalize_lines(text)
+
+
+def _extract_text(url: str, html: str) -> str:
+    markdown_url = _extract_markdown_alternate_url(html)
+    if markdown_url:
+        try:
+            markdown_response = requests.get(markdown_url, headers=HEADERS, timeout=30)
+            markdown_response.raise_for_status()
+            markdown_text = _extract_text_from_markdown(markdown_response.text)
+            if markdown_text:
+                return markdown_text
+        except requests.RequestException:
+            logger.warning("Falha ao buscar markdown alternativo para %s", url)
+
+    main_html = _prune_html(_extract_main_html(html))
 
     if trafilatura is not None:
         text = trafilatura.extract(
@@ -274,7 +464,7 @@ def _build_document(url: str, html: str) -> Dict:
     spec = _spec_for_url(url)
     titulo = _extract_title(html, spec.nome_produto)
     doc_id = _slugify(spec.nome_produto)
-    conteudo = _extract_text(html)
+    conteudo = _extract_text(url, html)
 
     return {
         "id": doc_id,
@@ -313,8 +503,28 @@ def save_document(doc: Dict, raw_html: str | None = None) -> Path:
     return output_path
 
 
+def clear_nvidia_kb_artifacts() -> None:
+    """
+    Remove artefatos antigos da base NVIDIA para evitar que documentos
+    removidos da lista de fontes continuem entrando no chunking.
+    """
+    for directory, pattern in (
+        (NVIDIA_KB_PROCESSED_DIR, "*.json"),
+        (NVIDIA_KB_RAW_DIR, "*.source.html"),
+    ):
+        if not directory.exists():
+            continue
+
+        for path in directory.glob(pattern):
+            try:
+                path.unlink()
+            except OSError as exc:
+                logger.warning("Falha ao remover artefato antigo %s: %s", path, exc)
+
+
 def collect_and_save_urls(urls: List[str]) -> List[Path]:
     saved_paths: List[Path] = []
+    clear_nvidia_kb_artifacts()
 
     for url in urls:
         response = requests.get(url, headers=HEADERS, timeout=30)

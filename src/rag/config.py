@@ -7,6 +7,7 @@ DATA_PROCESSED = ROOT / "data" / "processed"
 DATA_RAW = ROOT / "data" / "raw"
 NVIDIA_KB_RAW_DIR = DATA_RAW / "nvidia_kb"
 NVIDIA_KB_PROCESSED_DIR = DATA_PROCESSED / "nvidia_kb"
+NVIDIA_KB_CHUNKS_DIR = DATA_PROCESSED / "nvidia_kb_chunks"
 
 # Modelo de embeddings (HuggingFace / sentence-transformers)
 EMBEDDING_MODEL = os.environ.get("RAG_EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5")

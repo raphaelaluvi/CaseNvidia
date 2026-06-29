@@ -3,7 +3,7 @@ from typing import List
 from .embeddings import EmbeddingClient
 from .store import init_chroma
 from .retriever import retrieve
-from .reranker import rerank_with_openrouter
+from .reranking import rerank_with_openrouter
 from .config import RERANK_TOPK
 
 def answer_query(query: str, collection: str = "nvidia_kb") -> str:

@@ -1,27 +1,53 @@
-#  inicializa o Chroma e fornece função para inserir documentos
-from typing import List, Dict
+from typing import Dict, List
+
 from .config import CHROMA_PERSIST_DIR
+
 
 def init_chroma(persist_dir: str = CHROMA_PERSIST_DIR):
     """
-    Inicializa e retorna um cliente Chroma com persistência DuckDB+Parquet.
+    Inicializa e retorna um cliente Chroma com persistencia local.
     """
     try:
         import chromadb
-        from chromadb.config import Settings
-    except Exception as e:
-        raise RuntimeError("chromadb é necessário: pip install chromadb") from e
+    except Exception as exc:
+        raise RuntimeError("chromadb e necessario: pip install chromadb") from exc
 
-    client = chromadb.Client(Settings(chroma_db_impl="duckdb+parquet", persist_directory=str(persist_dir)))
-    return client
+    return chromadb.PersistentClient(path=str(persist_dir))
+
+
+def get_or_create_collection(client, collection_name: str):
+    return client.get_or_create_collection(name=collection_name)
+
+
+def reset_collection(client, collection_name: str):
+    """
+    Remove e recria a colecao para reindexacao limpa.
+    """
+    try:
+        client.delete_collection(collection_name)
+    except Exception:
+        pass
+    return client.get_or_create_collection(name=collection_name)
+
 
 def upsert_documents(client, collection_name: str, docs: List[Dict]):
     """
-    Insere ou atualiza documentos em uma coleção Chroma.
-    Cada item em `docs` deve conter `id`, `text` e opcional `meta` (dict).
+    Insere ou atualiza documentos em uma colecao Chroma.
+    Cada item deve conter:
+    - id
+    - text
+    - embedding
+    - meta (opcional)
     """
-    coll = client.get_or_create_collection(name=collection_name)
-    ids = [d.get("id") for d in docs]
-    texts = [d.get("text") for d in docs]
+    coll = get_or_create_collection(client, collection_name)
+    ids = [d["id"] for d in docs]
+    texts = [d["text"] for d in docs]
     metadatas = [d.get("meta", {}) for d in docs]
-    coll.add(ids=ids, documents=texts, metadatas=metadatas)
+    embeddings = [d["embedding"] for d in docs]
+
+    coll.upsert(
+        ids=ids,
+        documents=texts,
+        metadatas=metadatas,
+        embeddings=embeddings,
+    )
