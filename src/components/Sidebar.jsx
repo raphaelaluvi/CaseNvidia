@@ -1,5 +1,5 @@
 const scoreBands = ["Todos", "85+", "70-84", "<70"];
-const statuses = ["Todos", "Validado", "Em revisao", "Validacao pendente"];
+const statuses = ["Todos", "Validado", "Em revisão", "Validação pendente"];
 
 function FilterGroup({ label, value, onChange, options }) {
   return (
@@ -34,7 +34,10 @@ export function Sidebar({
   return (
     <aside className="sidebar panel">
       <div className="sidebar-section">
-        <p className="section-label">Filtros do radar</p>
+        <div className="section-heading">
+          <p className="section-label">Filtros do radar</p>
+          <span>{startups.length} analisadas</span>
+        </div>
         <FilterGroup
           label="Segmento"
           value={segmentFilter}
@@ -47,18 +50,6 @@ export function Sidebar({
           onChange={onScoreFilterChange}
           options={scoreBands}
         />
-        <FilterGroup
-          label="Status de validacao"
-          value={statusFilter}
-          onChange={onStatusFilterChange}
-          options={statuses}
-        />
-        <FilterGroup
-          label="Cidade / mercado"
-          value={cityFilter}
-          onChange={onCityFilterChange}
-          options={cities}
-        />
       </div>
 
       <div className="sidebar-section">
@@ -67,6 +58,11 @@ export function Sidebar({
           <span>{startups.length} startups</span>
         </div>
         <div className="startup-list">
+          {startups.length === 0 ? (
+            <div className="empty-state">
+              Nenhuma startup analisada ainda. Inicie uma análise pelo topo do dashboard.
+            </div>
+          ) : null}
           {startups.map((startup) => (
             <button
               key={startup.id}

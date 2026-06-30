@@ -1,4 +1,21 @@
 export function DetailPanel({ startup }) {
+  if (!startup) {
+    return (
+      <section className="panel detail-panel">
+        <div className="section-heading">
+          <div>
+            <p className="section-label">Detalhes da startup</p>
+            <h2>Aguardando análise</h2>
+          </div>
+        </div>
+        <p className="detail-description">
+          Execute uma análise para visualizar descrição estruturada, evidências e próximos
+          passos.
+        </p>
+      </section>
+    );
+  }
+
   return (
     <section className="panel detail-panel">
       <div className="section-heading">
@@ -6,7 +23,6 @@ export function DetailPanel({ startup }) {
           <p className="section-label">Detalhes da startup</p>
           <h2>{startup.name}</h2>
         </div>
-        <span className="status-pill">{startup.classification}</span>
       </div>
 
       <p className="detail-description">{startup.description}</p>
@@ -29,29 +45,9 @@ export function DetailPanel({ startup }) {
           <strong>{startup.validationStatus}</strong>
         </div>
       </div>
-
-      <div className="detail-columns">
-        <div>
-          <h3>Sinais identificados</h3>
-          <ul>
-            {startup.signals.map((signal) => (
-              <li key={signal}>{signal}</li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <h3>Fontes e evidencias</h3>
-          <ul>
-            {startup.evidence.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </div>
-      </div>
-
-      <div>
-        <h3>Proximos passos</h3>
-        <ul>
+      <div className="detail-section">
+        <h3>Próximos passos</h3>
+        <ul className="detail-list">
           {startup.nextSteps.map((step) => (
             <li key={step}>{step}</li>
           ))}

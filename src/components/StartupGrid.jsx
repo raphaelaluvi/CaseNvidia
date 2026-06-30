@@ -4,18 +4,29 @@ function scoreTone(score) {
   return "fair";
 }
 
+const MAX_VISIBLE_TAGS = 4;
+
+function getVisibleTags(tags = []) {
+  const visibleTags = tags.slice(0, MAX_VISIBLE_TAGS);
+  const hiddenTagCount = Math.max(tags.length - visibleTags.length, 0);
+  return { visibleTags, hiddenTagCount };
+}
+
 export function StartupGrid({ startups, selectedStartupId, onSelectStartup }) {
   return (
     <section className="panel">
       <div className="section-heading">
         <div>
           <p className="section-label">Radar de startups</p>
-          <h2>Pipeline priorizado para analise</h2>
+          <h2>Pipeline priorizado para análise</h2>
         </div>
         <span>{startups.length} resultados</span>
       </div>
       <div className="startup-grid">
-        {startups.map((startup) => (
+        {startups.map((startup) => {
+          const { visibleTags, hiddenTagCount } = getVisibleTags(startup.tags);
+
+          return (
           <article
             key={startup.id}
             className={`startup-card ${selectedStartupId === startup.id ? "selected" : ""}`}
@@ -44,18 +55,18 @@ export function StartupGrid({ startups, selectedStartupId, onSelectStartup }) {
             <p className="startup-summary">{startup.summary}</p>
 
             <div className="tag-row">
-              {startup.tags.map((tag) => (
+              {visibleTags.map((tag) => (
                 <span key={tag} className="tag">
                   {tag}
                 </span>
               ))}
+              {hiddenTagCount > 0 ? (
+                <span className="tag tag-muted">+{hiddenTagCount}</span>
+              ) : null}
             </div>
-
-            <button className="button tertiary" type="button" onClick={() => onSelectStartup(startup.id)}>
-              Ver detalhes
-            </button>
           </article>
-        ))}
+          );
+        })}
       </div>
       {startups.length === 0 ? (
         <div className="empty-state">

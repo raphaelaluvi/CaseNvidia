@@ -1,15 +1,10 @@
 import { useState } from "react";
 
-const suggestions = [
-  "Quais startups tem maior aderencia ao ecossistema NVIDIA?",
-  "Mostre empresas de healthtech com potencial de IA generativa",
-  "Quais produtos NVIDIA fazem mais sentido para esta startup?",
-];
-
-export function ChatPanel({ messages, onSendMessage }) {
+export function ChatPanel({ messages, onSendMessage, isSending = false, disabled = false }) {
   const [input, setInput] = useState("");
 
   const submitMessage = () => {
+    if (disabled || isSending) return;
     onSendMessage(input);
     setInput("");
   };
@@ -19,27 +14,21 @@ export function ChatPanel({ messages, onSendMessage }) {
       <div className="section-heading">
         <div>
           <p className="section-label">Chat de consulta</p>
-          <h2>Radar assistant</h2>
+          <h2>Radar assistente</h2>
         </div>
       </div>
 
-      <div className="suggestion-row">
-        {suggestions.map((suggestion) => (
-          <button
-            key={suggestion}
-            className="suggestion-chip"
-            type="button"
-            onClick={() => onSendMessage(suggestion)}
-          >
-            {suggestion}
-          </button>
-        ))}
-      </div>
-
       <div className="chat-messages">
+        {messages.length === 0 ? (
+          <div className="empty-state">
+            {disabled
+              ? "Selecione ou analise uma startup para habilitar o chat com LLM."
+              : "Nenhuma mensagem ainda. Use o campo abaixo para iniciar uma consulta."}
+          </div>
+        ) : null}
         {messages.map((message) => (
           <article key={message.id} className={`chat-bubble ${message.role}`}>
-            <span>{message.role === "assistant" ? "Radar" : "Voce"}</span>
+            <span>{message.role === "assistant" ? "Radar" : "Você"}</span>
             <p>{message.text}</p>
           </article>
         ))}
@@ -49,11 +38,12 @@ export function ChatPanel({ messages, onSendMessage }) {
         <textarea
           value={input}
           onChange={(event) => setInput(event.target.value)}
-          placeholder="Pergunte sobre fit NVIDIA, sinais de IA ou recomendacoes..."
+          placeholder="Pergunte sobre fit NVIDIA, sinais de IA ou recomendações..."
           rows={3}
+          disabled={disabled || isSending}
         />
-        <button className="button primary" type="button" onClick={submitMessage}>
-          Enviar
+        <button className="button primary" type="button" onClick={submitMessage} disabled={disabled || isSending}>
+          {isSending ? "Consultando..." : "Enviar"}
         </button>
       </div>
     </section>

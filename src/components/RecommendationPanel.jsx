@@ -1,4 +1,22 @@
 export function RecommendationPanel({ startup }) {
+  if (!startup) {
+    return (
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <p className="section-label">Recomendacoes NVIDIA</p>
+            <h2>Produtos com maior aderencia</h2>
+          </div>
+        </div>
+        <div className="recommendation-list">
+          <div className="empty-state">
+            As recomendacoes serao preenchidas com base no RAG NVIDIA apos a analise da startup.
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="panel">
       <div className="section-heading">

@@ -13,6 +13,8 @@ from src.scraping.relevancia import calcular_score_relevancia_ia
 from src.scraping.search_and_fetch import DATA_RAW_DIR, coletar_startup
 from src.storage import InMemoryStructuredRepository, StructuredRepository
 
+from .llm_judgment import evidence_citation_id, judge_startup_with_llm
+from .schemas import LlmJudgment
 from .state import PipelineState
 
 
@@ -63,6 +65,12 @@ def _normalize_url(value: str | None) -> str:
     netloc = parsed.netloc.replace("www.", "")
     path = parsed.path.rstrip("/")
     return f"{netloc}{path}"
+
+
+def _clamp_score(value: float | None, fallback: float = 0.0) -> float:
+    if value is None:
+        return fallback
+    return max(0.0, min(1.0, float(value)))
 
 
 def _semantic_variants(value: str | None) -> set[str]:
@@ -248,6 +256,65 @@ def _validate_startup_against_evidences(startup, evidences) -> dict[str, Any]:
     }
 
 
+def _allowed_citation_ids(evidences, rag_context: RagResult | None = None) -> set[str]:
+    allowed = {evidence_citation_id(item, index) for index, item in enumerate(evidences, start=1)}
+    if rag_context:
+        allowed.update(item.citation for item in rag_context.items if item.citation)
+    return allowed
+
+
+def _filter_valid_citations(citations: list[str], allowed: set[str]) -> list[str]:
+    valid = []
+    for citation in citations:
+        normalized = (citation or "").strip()
+        if normalized and normalized in allowed and normalized not in valid:
+            valid.append(normalized)
+    return valid
+
+
+def _build_llm_based_classification(
+    startup,
+    evidences,
+    rag_context: RagResult,
+) -> tuple[StartupClassification, dict[str, Any], list[str]]:
+    allowed_citations = _allowed_citation_ids(evidences, rag_context)
+    judgment = judge_startup_with_llm(startup, evidences, rag_context)
+    valid_citations = _filter_valid_citations(judgment.citations, allowed_citations)
+    score = _clamp_score(judgment.score, startup.ai_native_score or 0.0)
+    classification = StartupClassification(
+        label=judgment.label or "uncertain",
+        score=score,
+        rationale=judgment.rationale or "Classificacao gerada via LLM com grounding nas evidencias.",
+        method="llm_grounded_v1",
+        signals=(judgment.signals or [])[:4],
+    )
+    metadata = {
+        "llm_judgment": judgment.model_dump(),
+        "classification_citations": valid_citations,
+    }
+    logs = [
+        "classifier usou julgamento via LLM com citacoes validadas",
+    ]
+    invalid_count = len(judgment.citations) - len(valid_citations)
+    if invalid_count > 0:
+        logs.append(f"classifier descartou {invalid_count} citacoes invalidas retornadas pela LLM")
+    return classification, metadata, logs
+
+
+def _build_heuristic_classification(startup, evidences) -> StartupClassification:
+    base_text = "\n\n".join(filter(None, [startup.short_description] + [e.excerpt for e in evidences]))
+    relevance = calcular_score_relevancia_ia(base_text)
+    return StartupClassification(
+        label="ai_native_candidate" if relevance["vale_aprofundar"] else "uncertain",
+        score=float(relevance["score"]),
+        rationale="Classificacao inicial heuristica baseada em termos e evidencias coletadas.",
+        signals=[
+            *relevance["termos_fortes_encontrados"],
+            *relevance["termos_medios_encontrados"],
+        ],
+    )
+
+
 def _pick_target_startup(state: PipelineState) -> str | None:
     if state.get("target_startup"):
         return state["target_startup"]
@@ -353,29 +420,32 @@ def classifier_node(state: PipelineState) -> dict:
     evidences = state.get("validated_evidences") or []
     if startup is None:
         return _error(state, "Classifier sem startup estruturada.")
+    rag_context = state.get("rag_context") or RagResult(query=startup.name, summary="", items=[])
 
-    base_text = "\n\n".join(filter(None, [startup.short_description] + [e.excerpt for e in evidences]))
-    relevance = calcular_score_relevancia_ia(base_text)
-    classification = StartupClassification(
-        label="ai_native_candidate" if relevance["vale_aprofundar"] else "uncertain",
-        score=float(relevance["score"]),
-        rationale="Classificacao inicial heuristica baseada em termos e evidencias coletadas.",
-        signals=[
-            *relevance["termos_fortes_encontrados"],
-            *relevance["termos_medios_encontrados"],
-        ],
-    )
+    llm_metadata: dict[str, Any] = {}
+    try:
+        classification, llm_metadata, llm_logs = _build_llm_based_classification(
+            startup,
+            evidences,
+            rag_context,
+        )
+        logs = _log(state, "; ".join(llm_logs))
+    except Exception as exc:
+        classification = _build_heuristic_classification(startup, evidences)
+        logs = _log(state, f"classifier fallback heuristico acionado: {exc.__class__.__name__}")
 
     startup.classification = classification
-    startup.ai_native_score = float(relevance["score"])
+    startup.ai_native_score = _clamp_score(classification.score)
+    startup.metadata.update(llm_metadata)
     for evidence in evidences:
         evidence.is_validated = evidence.is_validated and not bool(evidence.error)
-        evidence.relevance_score = float(relevance["score"])
+        evidence.relevance_score = _clamp_score(classification.score)
 
     return {
         "structured_startup": startup,
         "initial_classification": classification,
         "validated_evidences": evidences,
+        "rag_context": rag_context,
         "quality_flags": _stage_quality(
             state,
             "classifier",
@@ -384,7 +454,7 @@ def classifier_node(state: PipelineState) -> dict:
             score=classification.score,
             method=classification.method,
         ),
-        "logs": _log(state, f"classifier marcou startup como {classification.label}"),
+        "logs": [*logs, f"classifier marcou startup como {classification.label}"],
     }
 
 
@@ -486,41 +556,111 @@ def recommendation_node(
         for item in rag_context.items[:3]
         if item.snippet
     ]
+    allowed_citations = _allowed_citation_ids(evidences, rag_context)
+    llm_judgment_payload = (startup.metadata or {}).get("llm_judgment") or {}
+    judgment = LlmJudgment.model_validate(llm_judgment_payload) if llm_judgment_payload else None
 
-    recommendation = Recommendation(
-        startup_name=startup.name,
-        summary=(
-            f"{startup.name} apresenta sinais iniciais de aderencia ao ecossistema NVIDIA."
-            if classification and classification.label == "ai_native_candidate"
-            else f"{startup.name} ainda precisa de validacao adicional antes de uma recomendacao forte."
-        ),
-        rationale=(
-            "Versao inicial baseada em heuristica + contexto RAG. "
-            "TODO: substituir por agente de recomendacao com grounding e citacoes."
-        ),
-        matched_products=[],
-        matched_context_snippets=matched_snippets,
-        confidence=classification.score if classification and classification.score is not None else None,
-        next_steps=[
+    try:
+        judgment = judge_startup_with_llm(startup, evidences, rag_context)
+        startup.metadata["llm_judgment"] = judgment.model_dump()
+        if classification is not None:
+            classification.label = judgment.label or classification.label
+            classification.score = _clamp_score(judgment.score, classification.score or 0.0)
+            classification.rationale = judgment.rationale or classification.rationale
+            classification.method = "llm_grounded_v1"
+            classification.signals = (judgment.signals or classification.signals)[:4]
+            startup.classification = classification
+            startup.ai_native_score = _clamp_score(classification.score)
+        judgment_log = "recommendation atualizou classificacao via LLM com contexto RAG"
+    except Exception as exc:
+        judgment_log = f"recommendation manteve julgamento anterior por fallback: {exc.__class__.__name__}"
+
+    if judgment:
+        valid_summary_citations = _filter_valid_citations(judgment.citations, allowed_citations)
+        matched_products = [item.product for item in judgment.recommendations[:3]]
+        recommendation_citations = []
+        for item in judgment.recommendations[:3]:
+            recommendation_citations.extend(_filter_valid_citations(item.citations, allowed_citations))
+        unique_recommendation_citations = list(dict.fromkeys(recommendation_citations))
+        summary = (
+            f"{startup.name} apresenta aderencia a {', '.join(matched_products[:2])}."
+            if matched_products
+            else (
+                f"{startup.name} apresenta sinais iniciais de aderencia ao ecossistema NVIDIA."
+                if classification and classification.label == "ai_native_candidate"
+                else f"{startup.name} ainda precisa de validacao adicional antes de uma recomendacao forte."
+            )
+        )
+        rationale = judgment.rationale or "Recomendacao gerada via LLM com grounding em evidencias e RAG."
+        next_steps = judgment.next_steps[:3] or [
             "Validar evidencias corporativas primarias da startup.",
-            "Substituir classificacao heuristica por julgamento via LLM com citacoes.",
-        ],
-        metadata={
-            "rag_summary": rag_context.summary,
-            "rag_item_count": len(rag_context.items),
-            "rag_sources": [
-                {
-                    "citation": item.citation,
-                    "document_id": item.document_id,
-                    "source_title": item.source_title,
-                    "source_url": item.source_url,
-                    "retrieval_score": item.retrieval_score,
-                    "rerank_score": item.rerank_score,
-                }
-                for item in rag_context.items[:5]
+            "Confirmar stack tecnico e maturidade de deployment com o time fundador.",
+        ]
+        recommendation = Recommendation(
+            startup_name=startup.name,
+            summary=summary,
+            rationale=rationale,
+            matched_products=matched_products,
+            matched_context_snippets=matched_snippets,
+            confidence=classification.score if classification and classification.score is not None else None,
+            next_steps=next_steps,
+            metadata={
+                "rag_summary": rag_context.summary,
+                "rag_item_count": len(rag_context.items),
+                "rag_sources": [
+                    {
+                        "citation": item.citation,
+                        "document_id": item.document_id,
+                        "source_title": item.source_title,
+                        "source_url": item.source_url,
+                        "retrieval_score": item.retrieval_score,
+                        "rerank_score": item.rerank_score,
+                    }
+                    for item in rag_context.items[:5]
+                ],
+                "llm_recommendations": [item.model_dump() for item in judgment.recommendations[:3]],
+                "summary_citations": valid_summary_citations,
+                "recommendation_citations": unique_recommendation_citations,
+                "contradictions": judgment.contradictions,
+            },
+        )
+        recommendation_log = "recommendation consolidou julgamento via LLM com citacoes validadas"
+    else:
+        recommendation = Recommendation(
+            startup_name=startup.name,
+            summary=(
+                f"{startup.name} apresenta sinais iniciais de aderencia ao ecossistema NVIDIA."
+                if classification and classification.label == "ai_native_candidate"
+                else f"{startup.name} ainda precisa de validacao adicional antes de uma recomendacao forte."
+            ),
+            rationale=(
+                "Versao inicial baseada em heuristica + contexto RAG. "
+                "TODO: substituir por agente de recomendacao com grounding e citacoes."
+            ),
+            matched_products=[],
+            matched_context_snippets=matched_snippets,
+            confidence=classification.score if classification and classification.score is not None else None,
+            next_steps=[
+                "Validar evidencias corporativas primarias da startup.",
+                "Configurar julgamento via LLM com citacoes para substituir o fallback heuristico.",
             ],
-        },
-    )
+            metadata={
+                "rag_summary": rag_context.summary,
+                "rag_item_count": len(rag_context.items),
+                "rag_sources": [
+                    {
+                        "citation": item.citation,
+                        "document_id": item.document_id,
+                        "source_title": item.source_title,
+                        "source_url": item.source_url,
+                        "retrieval_score": item.retrieval_score,
+                        "rerank_score": item.rerank_score,
+                    }
+                    for item in rag_context.items[:5]
+                ],
+            },
+        )
+        recommendation_log = "recommendation gerou recomendacao inicial em fallback"
 
     repository.save_startup(startup)
     repository.save_evidences(evidences)
@@ -529,6 +669,8 @@ def recommendation_node(
     repository.save_recommendations([recommendation])
 
     return {
+        "structured_startup": startup,
+        "initial_classification": classification,
         "recommendations": [recommendation],
         "quality_flags": _stage_quality(
             state,
@@ -536,7 +678,7 @@ def recommendation_node(
             "ok",
             recommendation_count=1,
         ),
-        "logs": _log(state, "recommendation gerou recomendacao inicial e persistiu camada estruturada"),
+        "logs": _log(state, f"{judgment_log}; {recommendation_log} e persistiu camada estruturada"),
     }
 
 

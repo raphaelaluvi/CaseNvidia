@@ -1,31 +1,13 @@
-import { useMemo, useState } from "react";
-import { startups as startupData } from "./data/startups";
+import { useEffect, useMemo, useState } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { Header } from "./components/Header";
-import { MetricsGrid } from "./components/MetricsGrid";
 import { StartupGrid } from "./components/StartupGrid";
 import { DetailPanel } from "./components/DetailPanel";
 import { RecommendationPanel } from "./components/RecommendationPanel";
 import { BriefingPanel } from "./components/BriefingPanel";
 import { ChatPanel } from "./components/ChatPanel";
 
-const initialMessages = [
-  {
-    id: 1,
-    role: "assistant",
-    text: "Radar ativo. Posso destacar startups com maior aderencia ao ecossistema NVIDIA, sinais de IA generativa e proximos passos recomendados.",
-  },
-  {
-    id: 2,
-    role: "user",
-    text: "Quais startups tem maior aderencia ao ecossistema NVIDIA?",
-  },
-  {
-    id: 3,
-    role: "assistant",
-    text: "NeuralCare AI, RetailFlow Vision e AgroVision Labs lideram o fit atual, com uso intensivo de inferencia visual, pipelines de modelos proprietarios e necessidade clara de aceleracao de deploy.",
-  },
-];
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 function normalize(text) {
   return text.trim().toLowerCase();
@@ -37,22 +19,27 @@ function scoreBand(score) {
   return "<70";
 }
 
-function getMockReply(input, selectedStartup) {
-  const value = normalize(input);
+async function apiRequest(path, options = {}) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers ?? {}),
+    },
+    ...options,
+  });
 
-  if (value.includes("healthtech") || value.includes("generativa")) {
-    return "NeuralCare AI e LexMind AI aparecem como melhores candidatas para casos com IA generativa aplicada a contexto regulado, especialmente por conta de NLP clinico, copilotos e camadas de evidencias verificaveis.";
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail || "Falha ao comunicar com a API.");
   }
 
-  if (value.includes("produto") || value.includes("nvidia")) {
-    return `${selectedStartup.name} combina melhor com ${selectedStartup.recommendations[0].name}, ${selectedStartup.recommendations[1].name} e ${selectedStartup.recommendations[2].name}, principalmente pelo nivel de maturidade tecnica e pelas necessidades de inferencia e escalabilidade identificadas.`;
-  }
+  return response.json();
+}
 
-  if (value.includes("risco") || value.includes("validacao")) {
-    return "Os principais riscos recorrentes no radar atual sao dependencia de poucas fontes publicas, necessidade de validacao comercial e pouca clareza sobre stack proprietaria em startups ainda seed.";
-  }
-
-  return `Analise resumida para ${selectedStartup.name}: score AI-native em ${selectedStartup.aiScore}, classificacao ${selectedStartup.classification} e status ${selectedStartup.validationStatus.toLowerCase()}. Posso aprofundar em fit NVIDIA, sinais tecnicos ou briefing executivo.`;
+function upsertStartup(current, nextStartup) {
+  const exists = current.some((startup) => startup.id === nextStartup.id);
+  if (!exists) return [nextStartup, ...current];
+  return current.map((startup) => (startup.id === nextStartup.id ? nextStartup : startup));
 }
 
 export default function App() {
@@ -61,25 +48,48 @@ export default function App() {
   const [scoreFilter, setScoreFilter] = useState("Todos");
   const [statusFilter, setStatusFilter] = useState("Todos");
   const [cityFilter, setCityFilter] = useState("Todos");
-  const [selectedStartupId, setSelectedStartupId] = useState(startupData[0].id);
-  const [chatMessages, setChatMessages] = useState(initialMessages);
+  const [selectedStartupId, setSelectedStartupId] = useState(null);
+  const [startups, setStartups] = useState([]);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [isLoadingStartups, setIsLoadingStartups] = useState(true);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isSendingChat, setIsSendingChat] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    const loadStartups = async () => {
+      try {
+        const data = await apiRequest("/api/startups");
+        setStartups(data);
+        if (data.length > 0) {
+          setSelectedStartupId(data[0].id);
+        }
+      } catch (error) {
+        setErrorMessage(error.message);
+      } finally {
+        setIsLoadingStartups(false);
+      }
+    };
+
+    loadStartups();
+  }, []);
 
   const selectedStartup = useMemo(
-    () => startupData.find((startup) => startup.id === selectedStartupId) ?? startupData[0],
-    [selectedStartupId],
+    () => startups.find((startup) => startup.id === selectedStartupId) ?? null,
+    [selectedStartupId, startups],
   );
 
   const segments = useMemo(
-    () => ["Todos", ...new Set(startupData.map((startup) => startup.segment))],
-    [],
+    () => ["Todos", ...new Set(startups.map((startup) => startup.segment))],
+    [startups],
   );
   const cities = useMemo(
-    () => ["Todos", ...new Set(startupData.map((startup) => startup.city))],
-    [],
+    () => ["Todos", ...new Set(startups.map((startup) => startup.city))],
+    [startups],
   );
 
   const filteredStartups = useMemo(() => {
-    return startupData.filter((startup) => {
+    return startups.filter((startup) => {
       const matchesSearch =
         searchTerm === "" ||
         normalize(startup.name).includes(normalize(searchTerm)) ||
@@ -92,44 +102,40 @@ export default function App() {
 
       return matchesSearch && matchesSegment && matchesScore && matchesStatus && matchesCity;
     });
-  }, [cityFilter, scoreFilter, searchTerm, segmentFilter, statusFilter]);
+  }, [cityFilter, scoreFilter, searchTerm, segmentFilter, startups, statusFilter]);
 
-  const metrics = useMemo(() => {
-    const highFit = startupData.filter((startup) => startup.nvidiaFit >= 85).length;
-    const pending = startupData.filter(
-      (startup) => startup.validationStatus === "Validacao pendente",
-    ).length;
-    const exported = startupData.filter((startup) => startup.briefingExported).length;
+  const handleAnalyze = async () => {
+    const startupName = searchTerm.trim();
+    if (!startupName) {
+      window.alert("Digite o nome da startup para iniciar a analise.");
+      return;
+    }
 
-    return [
-      {
-        label: "Startups analisadas",
-        value: startupData.length,
-        detail: "Pipeline demo carregado",
-      },
-      {
-        label: "Alto fit NVIDIA",
-        value: highFit,
-        detail: "Aderencia >= 85",
-      },
-      {
-        label: "Validacao pendente",
-        value: pending,
-        detail: "Prioridade para analista",
-      },
-      {
-        label: "Briefings exportados",
-        value: exported,
-        detail: "Ultimo ciclo de scouting",
-      },
-    ];
-  }, []);
+    setIsAnalyzing(true);
+    setErrorMessage("");
+    try {
+      const result = await apiRequest("/api/startups/analyze", {
+        method: "POST",
+        body: JSON.stringify({ startup_name: startupName }),
+      });
+      setStartups((current) => upsertStartup(current, result));
+      setSelectedStartupId(result.id);
+      setChatMessages([]);
+    } catch (error) {
+      setErrorMessage(error.message);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   const handleExport = () => {
+    if (!selectedStartup) return;
     window.alert(`Briefing executivo de ${selectedStartup.name} exportado em PDF ficticio.`);
   };
 
   const handleCopyBriefing = async () => {
+    if (!selectedStartup) return;
+
     const briefingText = [
       selectedStartup.executiveBrief.summary,
       ...selectedStartup.executiveBrief.bullets.map(
@@ -145,15 +151,38 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = (input) => {
-    if (!input.trim()) return;
+  const handleSendMessage = async (input) => {
+    if (!input.trim() || !selectedStartup || isSendingChat) return;
 
-    const reply = getMockReply(input, selectedStartup);
-    setChatMessages((current) => [
-      ...current,
-      { id: current.length + 1, role: "user", text: input },
-      { id: current.length + 2, role: "assistant", text: reply },
-    ]);
+    const userMessage = { id: Date.now(), role: "user", text: input };
+    setChatMessages((current) => [...current, userMessage]);
+    setIsSendingChat(true);
+
+    try {
+      const reply = await apiRequest("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          startup_id: selectedStartup.id,
+          startup_name: selectedStartup.name,
+          message: input,
+        }),
+      });
+      setChatMessages((current) => [
+        ...current,
+        { id: Date.now() + 1, role: "assistant", text: reply.answer, sources: reply.sources },
+      ]);
+    } catch (error) {
+      setChatMessages((current) => [
+        ...current,
+        {
+          id: Date.now() + 1,
+          role: "assistant",
+          text: `Nao foi possivel responder agora: ${error.message}`,
+        },
+      ]);
+    } finally {
+      setIsSendingChat(false);
+    }
   };
 
   return (
@@ -162,11 +191,17 @@ export default function App() {
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
         onExport={handleExport}
+        onAnalyze={handleAnalyze}
+        isAnalyzing={isAnalyzing}
       />
+      {errorMessage ? <div className="feedback-banner error">{errorMessage}</div> : null}
+      {isLoadingStartups ? (
+        <div className="feedback-banner">Carregando analises disponiveis...</div>
+      ) : null}
       <div className="dashboard-layout">
         <Sidebar
-          startups={startupData}
-          selectedStartupId={selectedStartup.id}
+          startups={startups}
+          selectedStartupId={selectedStartup?.id ?? ""}
           onSelectStartup={setSelectedStartupId}
           segmentFilter={segmentFilter}
           onSegmentFilterChange={setSegmentFilter}
@@ -180,24 +215,26 @@ export default function App() {
           cities={cities}
         />
         <main className="dashboard-main">
-          <MetricsGrid metrics={metrics} />
           <StartupGrid
             startups={filteredStartups}
-            selectedStartupId={selectedStartup.id}
+            selectedStartupId={selectedStartup?.id ?? ""}
             onSelectStartup={setSelectedStartupId}
           />
-          <section className="content-grid">
-            <DetailPanel startup={selectedStartup} />
-            <RecommendationPanel startup={selectedStartup} />
-          </section>
+          <DetailPanel startup={selectedStartup} />
           <section className="content-grid bottom-grid">
+            <RecommendationPanel startup={selectedStartup} />
             <BriefingPanel
               startup={selectedStartup}
               onExport={handleExport}
               onCopy={handleCopyBriefing}
             />
-            <ChatPanel messages={chatMessages} onSendMessage={handleSendMessage} />
           </section>
+          <ChatPanel
+            messages={chatMessages}
+            onSendMessage={handleSendMessage}
+            isSending={isSendingChat}
+            disabled={!selectedStartup}
+          />
         </main>
       </div>
     </div>
