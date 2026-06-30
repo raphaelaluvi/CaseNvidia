@@ -178,6 +178,23 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 5. Consulte recomendacoes, briefing executivo e chat contextual.
 6. Exporte o briefing em HTML quando necessario.
 
+## Exemplos para Teste no Frontend
+
+Se quiser validar a experiencia do dashboard manualmente, estes nomes sao bons candidatos para busca:
+
+- `NeuralCare AI`
+- `Alice`
+- `Cora`
+- `Zapia`
+- `Kunumi`
+- `Trybe`
+
+Sugestoes de uso:
+
+- teste um nome por vez no campo de busca principal
+- prefira startups com presenca publica clara em site institucional, LinkedIn ou materias
+- se a resposta vier fraca, tente variar entre nome fantasia e nome mais completo da startup
+
 ## Endpoints da API
 
 ### `GET /api/health`
