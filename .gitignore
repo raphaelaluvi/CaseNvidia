@@ -17,3 +17,5 @@ venv312/
 
 # Variáveis de ambiente
 .env
+node_modules/
+dist/
