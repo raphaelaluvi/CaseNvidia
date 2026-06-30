@@ -4,6 +4,7 @@ export function Header({
   onExport,
   onAnalyze,
   isAnalyzing,
+  isExportDisabled = false,
 }) {
   return (
     <header className="topbar panel">
@@ -25,7 +26,12 @@ export function Header({
           />
         </label>
         <div className="action-row">
-          <button className="button secondary" type="button" onClick={onExport}>
+          <button
+            className="button secondary"
+            type="button"
+            onClick={onExport}
+            disabled={isExportDisabled}
+          >
             Exportar briefing
           </button>
           <button className="button primary" type="button" onClick={onAnalyze}>

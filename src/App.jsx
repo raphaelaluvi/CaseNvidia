@@ -19,6 +19,215 @@ function scoreBand(score) {
   return "<70";
 }
 
+function slugify(value) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function buildBriefingDocument(startup) {
+  const exportedAt = new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "full",
+    timeStyle: "short",
+  }).format(new Date());
+
+  const briefingBullets = startup.executiveBrief.bullets
+    .map(
+      (bullet) => `
+        <article class="bullet-card">
+          <h3>${escapeHtml(bullet.label)}</h3>
+          <p>${escapeHtml(bullet.text)}</p>
+        </article>`,
+    )
+    .join("");
+
+  const recommendationCards = startup.recommendations
+    .map(
+      (recommendation) => `
+        <article class="recommendation-card">
+          <div class="card-head">
+            <h3>${escapeHtml(recommendation.name)}</h3>
+            <span>${escapeHtml(recommendation.confidence)}</span>
+          </div>
+          <p>${escapeHtml(recommendation.reason)}</p>
+          <p><strong>Aderencia:</strong> ${escapeHtml(recommendation.adherence)}</p>
+          <p><strong>Proximo passo:</strong> ${escapeHtml(recommendation.nextStep)}</p>
+        </article>`,
+    )
+    .join("");
+
+  const nextSteps = startup.nextSteps
+    .map((step) => `<li>${escapeHtml(step)}</li>`)
+    .join("");
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Briefing - ${escapeHtml(startup.name)}</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f7fb;
+        --panel: #ffffff;
+        --text: #10203a;
+        --muted: #5a6780;
+        --line: #d5deee;
+        --accent: #76b900;
+        --accent-soft: #eef8d7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 40px;
+        background: linear-gradient(180deg, #eef3ff 0%, var(--bg) 100%);
+        color: var(--text);
+        font: 16px/1.6 Arial, sans-serif;
+      }
+
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+      }
+
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 24px;
+        margin-bottom: 20px;
+        box-shadow: 0 12px 30px rgba(16, 32, 58, 0.08);
+      }
+
+      h1, h2, h3, p {
+        margin-top: 0;
+      }
+
+      .eyebrow {
+        color: var(--accent);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 12px;
+      }
+
+      .hero-grid,
+      .metrics-grid,
+      .briefing-grid,
+      .recommendation-grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .hero-grid,
+      .metrics-grid {
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      }
+
+      .briefing-grid,
+      .recommendation-grid {
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      }
+
+      .metric-card,
+      .bullet-card,
+      .recommendation-card {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 16px;
+        background: #fbfcff;
+      }
+
+      .metric-card span,
+      .exported-at {
+        color: var(--muted);
+      }
+
+      .fit-badge {
+        display: inline-block;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: #335000;
+        font-weight: 700;
+      }
+
+      .card-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: baseline;
+      }
+
+      ul {
+        padding-left: 20px;
+        margin-bottom: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section>
+        <p class="eyebrow">NVIDIA Startup AI Radar</p>
+        <h1>${escapeHtml(startup.name)}</h1>
+        <p>${escapeHtml(startup.summary)}</p>
+        <p class="exported-at">Exportado em ${escapeHtml(exportedAt)}</p>
+      </section>
+
+      <section>
+        <h2>Panorama geral</h2>
+        <div class="hero-grid">
+          <div>
+            <p>${escapeHtml(startup.description)}</p>
+          </div>
+          <div>
+            <span class="fit-badge">Fit NVIDIA ${escapeHtml(startup.nvidiaFit)}</span>
+          </div>
+        </div>
+        <div class="metrics-grid">
+          <div class="metric-card"><span>Segmento</span><h3>${escapeHtml(startup.segment)}</h3></div>
+          <div class="metric-card"><span>Cidade</span><h3>${escapeHtml(startup.city)}</h3></div>
+          <div class="metric-card"><span>Score AI-native</span><h3>${escapeHtml(startup.aiScore)}</h3></div>
+          <div class="metric-card"><span>Status</span><h3>${escapeHtml(startup.validationStatus)}</h3></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Briefing executivo</h2>
+        <p>${escapeHtml(startup.executiveBrief.summary)}</p>
+        <div class="briefing-grid">${briefingBullets}</div>
+      </section>
+
+      <section>
+        <h2>Recomendacoes NVIDIA</h2>
+        <div class="recommendation-grid">${recommendationCards}</div>
+      </section>
+
+      <section>
+        <h2>Proximos passos</h2>
+        <ul>${nextSteps}</ul>
+      </section>
+    </main>
+  </body>
+</html>`;
+}
+
 async function apiRequest(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
@@ -129,8 +338,24 @@ export default function App() {
   };
 
   const handleExport = () => {
-    if (!selectedStartup) return;
-    window.alert(`Briefing executivo de ${selectedStartup.name} exportado em PDF ficticio.`);
+    if (!selectedStartup) {
+      window.alert("Selecione uma startup para exportar o briefing.");
+      return;
+    }
+
+    const documentContent = buildBriefingDocument(selectedStartup);
+    const blob = new Blob([documentContent], {
+      type: "text/html;charset=utf-8",
+    });
+    const url = window.URL.createObjectURL(blob);
+    const link = window.document.createElement("a");
+
+    link.href = url;
+    link.download = `briefing-${slugify(selectedStartup.name)}.html`;
+    window.document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
   };
 
   const handleCopyBriefing = async () => {
@@ -193,6 +418,7 @@ export default function App() {
         onExport={handleExport}
         onAnalyze={handleAnalyze}
         isAnalyzing={isAnalyzing}
+        isExportDisabled={!selectedStartup}
       />
       {errorMessage ? <div className="feedback-banner error">{errorMessage}</div> : null}
       {isLoadingStartups ? (

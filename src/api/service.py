@@ -71,6 +71,84 @@ def _is_noisy_snippet(text: str) -> bool:
     return any(marker in lowered for marker in noisy_markers)
 
 
+def _looks_like_news_lead(text: str) -> bool:
+    lowered = " ".join((text or "").lower().split())
+    if not lowered:
+        return False
+
+    news_markers = (
+        "atualizado",
+        "publicado em",
+        "g1",
+        "uol",
+        "exame",
+        "brazil journal",
+        "neofeed",
+        "segundo a empresa",
+    )
+    if any(marker in lowered for marker in news_markers):
+        return True
+
+    has_date = bool(re.search(r"\b\d{2}/\d{2}/\d{4}\b", lowered))
+    has_time = bool(re.search(r"\b\d{1,2}h\d{2}\b", lowered))
+    return has_date and has_time
+
+
+def _clean_startup_text(text: str | None, startup_name: str | None = None) -> str:
+    cleaned = " ".join((text or "").split())
+    if not cleaned:
+        return ""
+
+    if startup_name:
+        cleaned = re.sub(
+            rf"^{re.escape(startup_name)}\s*[|:\-—]+\s*",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        ).strip()
+
+    cleaned = re.sub(
+        r"^\s*[A-ZÀ-ÿ][^.!?]{0,80}\b\d{2}/\d{2}/\d{4}\b[^.!?]{0,120}",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip(" -—:|")
+
+    return cleaned
+
+
+def _fallback_startup_description(startup: Startup, classification: StartupClassification | None) -> str:
+    segment = (startup.segment or "").strip()
+    tags = [tag.replace("_", " ") for tag in startup.tags[:3] if tag]
+    if segment and tags:
+        return f"{startup.name} atua em {segment} com sinais de {', '.join(tags)}."
+    if segment:
+        return f"{startup.name} atua em {segment} e segue em analise de sinais AI-native."
+    if classification and classification.signals:
+        signals = ", ".join(classification.signals[:3])
+        return f"{startup.name} apresenta sinais iniciais ligados a {signals}."
+    return f"{startup.name} segue em analise com base nas evidencias publicas coletadas."
+
+
+def _resolve_startup_description(
+    startup: Startup,
+    classification: StartupClassification | None,
+    validation_report: dict[str, Any],
+) -> str:
+    raw_description = startup.short_description or ""
+    cleaned_description = _clean_startup_text(raw_description, startup.name)
+    unsupported_fields = set(validation_report.get("unsupported_fields") or [])
+
+    if (
+        not cleaned_description
+        or "short_description" in unsupported_fields
+        or _looks_like_news_lead(cleaned_description)
+    ):
+        return _fallback_startup_description(startup, classification)
+
+    return _truncate_text(cleaned_description, 280)
+
+
 def _summarize_rag_snippet(item: RagCitationItem, recommendation: Recommendation | None) -> str:
     snippet = " ".join((item.snippet or "").split())
     if not snippet or _is_noisy_snippet(snippet):
@@ -222,6 +300,7 @@ def serialize_analysis_result(payload: dict[str, Any]) -> dict[str, Any]:
         recommendation.confidence if recommendation else classification.score if classification else 0
     )
     startup_id = startup.id or _slugify(startup.name)
+    resolved_description = _resolve_startup_description(startup, classification, validation_report)
 
     return {
         "id": startup_id,
@@ -235,8 +314,8 @@ def serialize_analysis_result(payload: dict[str, Any]) -> dict[str, Any]:
             validation_report.get("status") or startup.metadata.get("validation_status")
         ),
         "tags": startup.tags or (classification.signals if classification else []) or ["Analise em andamento"],
-        "summary": startup.short_description or "Sem resumo estruturado disponivel.",
-        "description": startup.short_description or "Sem descricao estruturada disponivel.",
+        "summary": resolved_description or "Sem resumo estruturado disponivel.",
+        "description": resolved_description or "Sem descricao estruturada disponivel.",
         "signals": _build_signals(startup, classification),
         "evidence": _build_evidences(evidences),
         "nextSteps": (
