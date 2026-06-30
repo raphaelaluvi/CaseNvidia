@@ -233,7 +233,7 @@ O teste de smoke em `tests/test_pipeline_smoke.py` valida a execucao ponta a pon
 - O armazenamento de analises da API atual e em memoria durante a sessao.
 - Sem `GROQ_API_KEY`, recursos de chat e extracao LLM nao funcionam.
 - O frontend depende da API para listar startups, analisar empresas e responder no chat.
-- Existem configuracoes no repositorio preparadas para evolucoes de persistencia e RAG, mas o fluxo principal atual nao depende de `PostgreSQL`, `Qdrant` ou `Docker Compose`.
+- Existem configuracoes no repositorio preparadas para evolucoes de persistencia e RAG, mas o fluxo principal atual nao depende de `PostgreSQL` ou `Docker Compose`.
 
 ## Proximos Pontos de Evolucao
 
