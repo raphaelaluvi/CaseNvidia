@@ -76,3 +76,21 @@ class Recommendation(BaseModel):
     confidence: float | None = None
     next_steps: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RagCitationItem(BaseModel):
+    citation: str
+    snippet: str
+    source_title: str | None = None
+    source_url: str | None = None
+    source_metadata: dict[str, Any] = Field(default_factory=dict)
+    retrieval_score: float | None = None
+    rerank_score: float | None = None
+    document_id: str | None = None
+
+
+class RagResult(BaseModel):
+    query: str
+    summary: str = ""
+    items: list[RagCitationItem] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)

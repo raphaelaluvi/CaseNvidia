@@ -58,6 +58,29 @@ def _print_section(title: str, payload) -> None:
     pprint(payload, sort_dicts=False)
 
 
+def _build_llm_diagnostics(state: dict) -> dict:
+    startup = state.get("structured_startup")
+    startup_metadata = startup.metadata if startup else {}
+    rag_quality = (state.get("quality_flags") or {}).get("rag") or {}
+    rag_context = state.get("rag_context")
+    rag_items = rag_context.items if rag_context else []
+    rag_metadata = rag_context.metadata if rag_context else {}
+
+    return {
+        "extraction_provider": startup_metadata.get("extraction_provider"),
+        "extraction_status": startup_metadata.get("extraction_status"),
+        "llm_extraction_present": bool(startup_metadata.get("llm_extraction")),
+        "validator_status": (state.get("validation_report") or {}).get("status"),
+        "rag_used_fallback": rag_quality.get("used_fallback"),
+        "rag_item_count": len(rag_items),
+        "rag_rerank_provider": rag_metadata.get("rerank_provider"),
+        "rag_rerank_status": rag_metadata.get("rerank_status"),
+        "rag_rerank_reasons": rag_metadata.get("rerank_reasons"),
+        "rag_rerank_scores": [item.rerank_score for item in rag_items[:5]],
+        "rag_citations": [item.citation for item in rag_items[:5]],
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Executa o pipeline LangGraph com dados de exemplo e imprime o estado final."
@@ -106,6 +129,7 @@ def main() -> None:
 
     _print_section("Logs", state.get("logs"))
     _print_section("Quality Flags", state.get("quality_flags"))
+    _print_section("LLM Diagnostics", _build_llm_diagnostics(state))
     _print_section("Validation Report", state.get("validation_report"))
     _print_section("Structured Startup", state.get("structured_startup").model_dump() if state.get("structured_startup") else None)
     _print_section(

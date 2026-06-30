@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
-from src.models import Evidence, Recommendation, ScrapeRun, Startup, StartupClassification
+from src.models import (
+    Evidence,
+    RagResult,
+    Recommendation,
+    ScrapeRun,
+    Startup,
+    StartupClassification,
+)
 
 
 class PipelineState(TypedDict, total=False):
@@ -19,7 +26,7 @@ class PipelineState(TypedDict, total=False):
     retry_counts: dict[str, int]
     retry_requested_by: str | None
     scrape_run: ScrapeRun | None
-    rag_context: str
+    rag_context: RagResult
     recommendations: list[Recommendation]
     final_briefing: str
     errors: list[str]

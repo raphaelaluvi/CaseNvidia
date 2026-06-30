@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from src.extraction import extract_startup_profile, save_extraction_result
-from src.models import Recommendation, ScrapeRun, StartupClassification
+from src.models import RagResult, Recommendation, ScrapeRun, StartupClassification
 from src.rag.api import answer_query
 from src.scraping.relevancia import calcular_score_relevancia_ia
 from src.scraping.search_and_fetch import DATA_RAW_DIR, coletar_startup
@@ -448,18 +448,21 @@ def rag_node(state: PipelineState) -> dict:
         rag_context = answer_query(query)
         logs = _log(state, "rag recuperou contexto em Chroma")
     except Exception as exc:
-        rag_context = (
-            "Contexto RAG indisponivel nesta execucao. "
-            "TODO: validar embeddings/colecao Chroma/credenciais do reranker."
+        rag_context = RagResult(
+            query=query,
+            summary="",
+            items=[],
         )
         logs = _log(state, f"rag fallback acionado: {exc}")
+    used_fallback = not bool(rag_context.items)
     return {
         "rag_context": rag_context,
         "quality_flags": _stage_quality(
             state,
             "rag",
-            "ok" if "indisponivel" not in rag_context.lower() else "warning",
-            used_fallback="indisponivel" in rag_context.lower(),
+            "ok" if not used_fallback else "warning",
+            used_fallback=used_fallback,
+            item_count=len(rag_context.items),
         ),
         "logs": logs,
     }
@@ -472,11 +475,17 @@ def recommendation_node(
     repository = repository or InMemoryStructuredRepository()
     startup = state.get("structured_startup")
     classification = state.get("initial_classification")
-    rag_context = state.get("rag_context") or ""
+    rag_context = state.get("rag_context") or RagResult(query=state.get("query") or "", summary="", items=[])
     evidences = state.get("validated_evidences") or []
 
     if startup is None:
         return _error(state, "Recommendation sem startup estruturada.")
+
+    matched_snippets = [
+        f"{item.citation} {item.snippet[:500]}".strip()
+        for item in rag_context.items[:3]
+        if item.snippet
+    ]
 
     recommendation = Recommendation(
         startup_name=startup.name,
@@ -490,12 +499,27 @@ def recommendation_node(
             "TODO: substituir por agente de recomendacao com grounding e citacoes."
         ),
         matched_products=[],
-        matched_context_snippets=[rag_context[:500]] if rag_context else [],
+        matched_context_snippets=matched_snippets,
         confidence=classification.score if classification and classification.score is not None else None,
         next_steps=[
             "Validar evidencias corporativas primarias da startup.",
             "Substituir classificacao heuristica por julgamento via LLM com citacoes.",
         ],
+        metadata={
+            "rag_summary": rag_context.summary,
+            "rag_item_count": len(rag_context.items),
+            "rag_sources": [
+                {
+                    "citation": item.citation,
+                    "document_id": item.document_id,
+                    "source_title": item.source_title,
+                    "source_url": item.source_url,
+                    "retrieval_score": item.retrieval_score,
+                    "rerank_score": item.rerank_score,
+                }
+                for item in rag_context.items[:5]
+            ],
+        },
     )
 
     repository.save_startup(startup)
