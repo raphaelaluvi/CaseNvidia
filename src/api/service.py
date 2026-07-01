@@ -9,6 +9,22 @@ from src.models import Evidence, RagCitationItem, Recommendation, Startup, Start
 from src.storage import InMemoryStructuredRepository
 
 
+def _repair_mojibake(text: str) -> str:
+    if not text:
+        return ""
+
+    suspicious_markers = ("Ã", "â", "\x92", "\x93", "\x94", "\x96", "\x97")
+    if not any(marker in text for marker in suspicious_markers):
+        return text
+
+    try:
+        repaired = text.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
+    return repaired if repaired.strip() else text
+
+
 def _slugify(value: str) -> str:
     normalized = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower())
     return normalized.strip("-") or "startup"
@@ -85,23 +101,71 @@ def _looks_like_news_lead(text: str) -> bool:
         "brazil journal",
         "neofeed",
         "segundo a empresa",
+        "skip to content",
+        "request demo",
+        "read the docs",
+        "hipaa compliant",
+        "soc 2 type ii",
+        "iso 27001",
+        "gdpr",
+        "fda 21 cfr part 11",
+        "nhs ig toolkit",
+        "top 10 startups",
     )
     if any(marker in lowered for marker in news_markers):
         return True
 
     has_date = bool(re.search(r"\b\d{2}/\d{2}/\d{4}\b", lowered))
     has_time = bool(re.search(r"\b\d{1,2}h\d{2}\b", lowered))
-    return has_date and has_time
+    has_long_english_date = bool(
+        re.search(
+            r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s+\d{4}\b",
+            lowered,
+        )
+    )
+    has_compliance_badges = sum(
+        marker in lowered
+        for marker in ("hipaa", "soc 2", "iso 27001", "gdpr", "fda 21 cfr part 11")
+    ) >= 2
+    return (has_date and has_time) or has_long_english_date or has_compliance_badges
+
+
+def _strip_leading_noise(text: str) -> str:
+    cleaned = text.strip()
+    noisy_prefixes = (
+        "request demo",
+        "read the docs",
+        "hipaa compliant",
+        "soc 2 type ii",
+        "iso 27001",
+        "gdpr",
+        "fda 21 cfr part 11",
+        "nhs ig toolkit",
+        "skip to content",
+    )
+
+    for _ in range(6):
+        lowered = cleaned.lower()
+        matched = False
+        for prefix in noisy_prefixes:
+            if lowered.startswith(prefix):
+                cleaned = cleaned[len(prefix):].strip(" -:|.,;✓→")
+                matched = True
+                break
+        if not matched:
+            break
+
+    return cleaned
 
 
 def _clean_startup_text(text: str | None, startup_name: str | None = None) -> str:
-    cleaned = " ".join((text or "").split())
+    cleaned = " ".join(_repair_mojibake(text or "").split())
     if not cleaned:
         return ""
 
     if startup_name:
         cleaned = re.sub(
-            rf"^{re.escape(startup_name)}\s*[|:\-—]+\s*",
+            rf"^{re.escape(startup_name)}\s*[|:\-–—]+\s*",
             "",
             cleaned,
             flags=re.IGNORECASE,
@@ -112,9 +176,16 @@ def _clean_startup_text(text: str | None, startup_name: str | None = None) -> st
         "",
         cleaned,
         flags=re.IGNORECASE,
-    ).strip(" -—:|")
+    ).strip(" -–—:|")
 
-    return cleaned
+    cleaned = re.sub(
+        r"^\s*[A-Z][a-z]+\s+\d{1,2},\s+\d{4}\s*[-|:]\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip(" -–—:|")
+
+    return _strip_leading_noise(cleaned)
 
 
 def _fallback_startup_description(startup: Startup, classification: StartupClassification | None) -> str:

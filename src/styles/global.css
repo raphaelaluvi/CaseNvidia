@@ -541,6 +541,64 @@ ul {
   margin: 0;
 }
 
+.chat-body {
+  display: grid;
+  gap: 10px;
+}
+
+.chat-paragraph {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.chat-subtitle {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--primary-deep);
+}
+
+.chat-list,
+.chat-source-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+  color: var(--text);
+}
+
+.chat-list.numbered {
+  padding-left: 22px;
+}
+
+.chat-list li,
+.chat-source-list li {
+  line-height: 1.55;
+}
+
+.chat-sources {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(127, 165, 82, 0.2);
+}
+
+.chat-sources span {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.chat-source-list a {
+  color: var(--primary-deep);
+  text-decoration: none;
+}
+
+.chat-source-list a:hover {
+  text-decoration: underline;
+}
+
 .chat-input {
   padding: 0 24px 24px;
   display: grid;
